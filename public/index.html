@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Surf</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23353e30'/%3E%3Cpath d='M4 22c4-6 8-6 12 0s8 6 12 0' stroke='%23b9cbb0' stroke-width='3' fill='none'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #1d221a;
+    --pill: rgba(20, 24, 18, .82);
+    --text: #e8efe4;
+    --muted: #9aa894;
+    --busy: #8fb4ff;
+    --done: #5fd38a;
+    --attn: #ffb547;
+    --border: rgba(255, 255, 255, .12);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+
+  #bar { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+    display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px);
+    padding: 8px 10px 8px 14px; border-radius: 999px; background: var(--pill);
+    border: 1px solid var(--border); backdrop-filter: blur(8px);
+    box-shadow: 0 6px 24px rgba(0,0,0,.35); transition: all .25s ease; user-select: none; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  #label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  #sub { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  #gear { all: unset; cursor: pointer; padding: 2px 6px; border-radius: 999px; color: var(--muted); }
+  #gear:hover { color: var(--text); background: rgba(255,255,255,.08); }
+
+  body[data-state="busy"] #dot { background: var(--busy); animation: pulse 1.4s ease-in-out infinite; }
+  body[data-state="idle"] #bar { background: var(--done); color: #08210f; border-color: transparent;
+    padding: 12px 14px 12px 20px; font-size: 16px; cursor: pointer; animation: bob 1s ease-in-out infinite; }
+  body[data-state="idle"] #dot { background: #08210f; }
+  body[data-state="idle"] #sub, body[data-state="idle"] #gear { color: #164a26; }
+  body[data-state="idle"].seen #bar { background: var(--pill); color: var(--text); font-size: 14px;
+    padding: 8px 10px 8px 14px; animation: none; border-color: var(--border); }
+  body[data-state="idle"].seen #dot { background: var(--done); }
+  body[data-state="idle"].seen #sub, body[data-state="idle"].seen #gear { color: var(--muted); }
+  body[data-state="attention"] #bar { background: var(--attn); color: #2b1a00; border-color: transparent;
+    padding: 12px 14px 12px 20px; font-size: 16px; cursor: pointer; animation: bob 1s ease-in-out infinite; }
+  body[data-state="attention"] #dot { background: #2b1a00; }
+  body[data-state="attention"] #sub, body[data-state="attention"] #gear { color: #5c3b00; }
+
+  @keyframes pulse { 50% { opacity: .35; transform: scale(.8); } }
+  @keyframes bob { 50% { transform: translateX(-50%) translateY(3px); } }
+
+  #menu { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 10;
+    width: min(320px, calc(100vw - 32px)); padding: 12px; border-radius: 12px; background: var(--pill);
+    border: 1px solid var(--border); backdrop-filter: blur(8px); display: none; }
+  #menu.open { display: block; }
+  #menu label, #menu button { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; padding: 8px 4px; color: var(--text); font: inherit; }
+  #menu button { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 8px 4px; cursor: pointer; color: var(--busy); }
+  #menu hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+  #sessions { color: var(--muted); font-size: 12px; padding: 4px; }
+  #sessions div { display: flex; justify-content: space-between; gap: 8px; }
+</style>
+</head>
+<body data-state="none">
+  <iframe id="game" src="https://surfd.net/" allow="fullscreen; pointer-lock; gamepad; autoplay" allowfullscreen></iframe>
+
+  <div id="bar" role="status" aria-live="polite">
+    <span id="dot"></span>
+    <span id="label">Waiting for Claude…</span>
+    <span id="sub"></span>
+    <button id="gear" title="Settings" aria-label="Settings">⚙</button>
+  </div>
+
+  <div id="menu">
+    <label>Sound when Claude is done <input type="checkbox" id="optSound"></label>
+    <label>Open this tab automatically <input type="checkbox" id="optAuto"></label>
+    <button id="optNotify">Enable desktop notifications</button>
+    <hr>
+    <div id="sessions"></div>
+  </div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const body = document.body;
+  let state = 'none', data = null, lastOverall = null, serverOffset = 0;
+  let flashTimer = null;
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('surf.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('surf.' + k, JSON.stringify(v)); } catch {} },
+  };
+  $('optSound').checked = store.get('sound', true);
+  $('optSound').onchange = e => store.set('sound', e.target.checked);
+  $('optAuto').onchange = e => fetch('/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ autoOpen: e.target.checked }) });
+
+  const updateNotifyBtn = () => {
+    const p = 'Notification' in window ? Notification.permission : 'denied';
+    $('optNotify').textContent = p === 'granted' ? 'Desktop notifications: on' : p === 'denied' ? 'Desktop notifications: blocked' : 'Enable desktop notifications';
+  };
+  updateNotifyBtn();
+  $('optNotify').onclick = async () => { if ('Notification' in window) await Notification.requestPermission(); updateNotifyBtn(); };
+
+  $('gear').onclick = e => { e.stopPropagation(); $('menu').classList.toggle('open'); };
+  $('bar').onclick = () => { if (state === 'idle' || state === 'attention') markSeen(); };
+  window.addEventListener('focus', () => { if (!document.hidden) stopFlash(); });
+
+  function markSeen() { body.classList.add('seen'); stopFlash(); }
+
+  function fmt(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  function ding(kind) {
+    if (!$('optSound').checked) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const notes = kind === 'attention' ? [880, 660, 880] : [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((f, i) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        const t = ctx.currentTime + i * 0.12;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.18, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+        o.connect(g).connect(ctx.destination);
+        o.start(t); o.stop(t + 0.4);
+      });
+      setTimeout(() => ctx.close(), 1500);
+    } catch {}
+  }
+
+  function notify(title, text) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      const n = new Notification(title, { body: text, tag: 'claude-surf', renotify: true });
+      n.onclick = () => { window.focus(); n.close(); };
+    } catch {}
+  }
+
+  function startFlash(msg) {
+    stopFlash();
+    let on = false;
+    flashTimer = setInterval(() => { document.title = (on = !on) ? msg : 'Claude Surf'; }, 900);
+  }
+  function stopFlash() { clearInterval(flashTimer); flashTimer = null; renderTitle(); }
+
+  function renderTitle() {
+    if (flashTimer) return;
+    document.title = state === 'busy' ? '🌊 Claude is working…' : state === 'idle' ? '✅ Claude is done' : state === 'attention' ? '⚠️ Claude needs you' : 'Claude Surf';
+  }
+
+  function render() {
+    if (!data) return;
+    const now = Date.now() + serverOffset;
+    const busy = data.sessions.filter(s => s.state === 'busy');
+    const attn = data.sessions.find(s => s.state === 'attention');
+    const done = data.sessions.filter(s => s.state === 'idle').sort((a, b) => b.since - a.since)[0];
+
+    if (state === 'busy') {
+      const oldest = Math.min(...busy.map(s => s.since));
+      $('label').textContent = busy.length > 1 ? `${busy.length} Claudes are working` : 'Claude is working — keep surfing';
+      $('sub').textContent = `${fmt(now - oldest)}${busy.length === 1 && busy[0].project ? ' · ' + busy[0].project : ''}`;
+    } else if (state === 'attention') {
+      $('label').textContent = 'Claude needs you';
+      $('sub').textContent = attn.message || attn.project || '';
+    } else if (state === 'idle') {
+      $('label').textContent = body.classList.contains('seen') ? 'Claude is done' : '✓ Claude is done — go check it';
+      $('sub').textContent = done && done.project ? done.project : '';
+    } else {
+      $('label').textContent = 'Waiting for Claude…';
+      $('sub').textContent = 'send a prompt to start';
+    }
+
+    $('optAuto').checked = !!data.settings.autoOpen;
+    $('sessions').innerHTML = data.sessions.length
+      ? data.sessions.map(s => `<div><span>${esc(s.project || s.id.slice(0, 8))}</span><span>${s.state}</span></div>`).join('')
+      : 'No active sessions';
+    renderTitle();
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function onData(d) {
+    data = d;
+    serverOffset = d.now - Date.now();
+    const overall = d.overall;
+    if (overall !== lastOverall) {
+      body.classList.remove('seen');
+      if (lastOverall !== null) {
+        if (overall === 'idle' && lastOverall !== 'none') {
+          const p = d.sessions.filter(s => s.state === 'idle').sort((a, b) => b.since - a.since)[0];
+          ding('done'); startFlash('✅ Claude is done!');
+          if (document.hidden || !document.hasFocus()) notify('Claude is done', p && p.project ? `Back to ${p.project}` : 'Your answer is ready.');
+        } else if (overall === 'attention') {
+          const a = d.sessions.find(s => s.state === 'attention');
+          ding('attention'); startFlash('⚠️ Claude needs you');
+          notify('Claude needs you', (a && a.message) || 'Claude is waiting for your input.');
+        } else {
+          stopFlash();
+        }
+      }
+      lastOverall = overall;
+    }
+    state = overall;
+    body.dataset.state = state;
+    render();
+  }
+
+  function connect() {
+    const es = new EventSource('/events');
+    es.onmessage = e => { try { onData(JSON.parse(e.data)); } catch {} };
+    es.onerror = () => {
+      $('label').textContent = 'Surf server offline';
+      $('sub').textContent = 'it restarts on your next prompt';
+    };
+  }
+  connect();
+  setInterval(render, 1000);
+})();
+</script>
+</body>
+</html>

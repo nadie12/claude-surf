@@ -1,0 +1,11 @@
+{
+  "name": "claude-surf",
+  "owner": { "name": "nadie12" },
+  "plugins": [
+    {
+      "name": "claude-surf",
+      "source": "./",
+      "description": "Surf (surfd.net) in your browser while Claude is thinking. Get pinged the moment it's done."
+    }
+  ]
+}
