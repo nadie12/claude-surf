@@ -1,5 +1,6 @@
 {
   "description": "Play surfd.net while Claude is working",
+  "modules": ["./pane.ts"],
   "hooks": {
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook.js\" busy", "timeout": 10 }] }

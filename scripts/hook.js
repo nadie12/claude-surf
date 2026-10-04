@@ -86,6 +86,7 @@ function readStdin() {
     project: input.cwd,
     state: action === 'heartbeat' ? 'busy' : action,
     heartbeat: action === 'heartbeat',
+    desktop: process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop',
     message: input.message,
   }).catch(() => {});
 })().catch(() => {}).finally(() => process.exit(0));

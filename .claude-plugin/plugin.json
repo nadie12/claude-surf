@@ -1,6 +1,6 @@
 {
   "name": "claude-surf",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Surf (surfd.net) in your browser while Claude is thinking. Get pinged the moment it's done.",
   "author": { "name": "nadie12" },
   "license": "MIT",

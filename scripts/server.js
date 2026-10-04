@@ -62,14 +62,18 @@ function anyBusy() {
   return [...sessions.values()].some(s => s.state === 'busy');
 }
 
+function openNow() {
+  if (!settings.autoOpen || clients.size > 0) return;
+  if (Date.now() - lastOpen < 20000) return; // a tab is probably still loading
+  lastOpen = Date.now();
+  openBrowser(`http://${HOST}:${PORT}/`);
+}
+
 function scheduleOpen() {
   if (!settings.autoOpen || clients.size > 0 || openTimer) return;
   openTimer = setTimeout(() => {
     openTimer = null;
-    if (!settings.autoOpen || clients.size > 0 || !anyBusy()) return;
-    if (Date.now() - lastOpen < 20000) return; // a tab is probably still loading
-    lastOpen = Date.now();
-    openBrowser(`http://${HOST}:${PORT}/`);
+    if (anyBusy()) openNow();
   }, OPEN_DELAY_MS);
 }
 
@@ -93,7 +97,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, app: 'claude-surf', clients: clients.size }));
+    return res.end(JSON.stringify({ ok: true, app: 'claude-surf', clients: clients.size, autoOpen: settings.autoOpen }));
   }
 
   if (req.method === 'GET' && url.pathname === '/events') {
@@ -127,9 +131,17 @@ const server = http.createServer(async (req, res) => {
       since: keepSince ? prev.since : Date.now(),
       updated: Date.now(),
     });
-    if (state === 'busy' && !b.heartbeat) scheduleOpen();
+    // In the desktop app the plugin's pane module opens Claude's own browser pane instead.
+    if (state === 'busy' && !b.heartbeat && !b.desktop) scheduleOpen();
     if (b.heartbeat && prev.state === state) { res.writeHead(204); return res.end(); }
     broadcast();
+    res.writeHead(204);
+    return res.end();
+  }
+
+  if (req.method === 'POST' && url.pathname === '/open') {
+    if (!String(req.headers['content-type']).includes('application/json')) { res.writeHead(415); return res.end(); }
+    openNow();
     res.writeHead(204);
     return res.end();
   }

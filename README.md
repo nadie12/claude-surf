@@ -20,11 +20,15 @@ In Claude Code:
 
 Restart Claude Code (or run `/hooks` to reload), then send any prompt. Requires Node.js 18+ on your `PATH` (you already have it if you installed Claude Code with npm).
 
+### In the Claude desktop app
+
+In the desktop app's Code tab, the game opens **inside Claude**, in its built-in browser pane, instead of in your external browser. Claude's status line shows "🏄 Claude is working, go surf", and you get a toast when the turn finishes.
+
 ## What it does
 
 | Claude Code event | What happens |
 | --- | --- |
-| You submit a prompt | Local server starts (if needed). If Claude is still busy after 3s and no surf tab is open, one opens. |
+| You submit a prompt | Local server starts (if needed). If Claude is still busy after 3s and no surf tab is open, one opens (in the desktop app: Claude's browser pane, after 2.5s). |
 | Claude uses tools | Heartbeat keeps the "working" timer alive. |
 | Claude needs permission | Banner turns amber: **Claude needs you**, with a chime and desktop notification. |
 | Claude finishes | Banner turns green: **Claude is done**, chime, flashing tab title, desktop notification. |
@@ -59,6 +63,7 @@ Claude Code hooks ──► scripts/hook.js ──HTTP──► scripts/server.j
                                           public/index.html  (surfd.net iframe + status pill)
 ```
 
+- `hooks/pane.ts` is a Claude Code hooks module. In the desktop app it opens the page in Claude's browser pane (through the `Claude_Browser` MCP server) and reuses the tab if it's already there.
 - `hook.js` runs on `UserPromptSubmit`, `PostToolUse`, `Stop`, `Notification` and `SessionEnd`. It starts the server if it isn't running, posts the session state, prints nothing, and always exits 0, so it can never block or change what Claude does.
 - `server.js` has no dependencies. It listens on localhost only, tracks each session's state, opens your default browser when needed, and shuts itself down after an hour of inactivity.
 - If you interrupt Claude with Esc (which fires no `Stop` hook), the session reads as idle on your next prompt, or after 30 minutes.
